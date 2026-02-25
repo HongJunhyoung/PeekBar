@@ -72,8 +72,8 @@ struct ThumbnailItemView: View {
                 maximizeWindow()
             }
             Divider()
-            Button("Quit") {
-                quitApp()
+            Button("Close Window") {
+                closeWindow()
             }
         }
         .help(windowInfo.title.isEmpty ? windowInfo.appName : "\(windowInfo.appName): \(windowInfo.title)")
@@ -160,8 +160,25 @@ struct ThumbnailItemView: View {
         }
     }
 
-    private func quitApp() {
-        guard let app = NSRunningApplication(processIdentifier: windowInfo.pid) else { return }
-        app.terminate()
+    private func closeWindow() {
+        guard PermissionService.hasAccessibility else { return }
+        let appElement = AXUIElementCreateApplication(windowInfo.pid)
+        var windowsRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef) == .success,
+              let axWindows = windowsRef as? [AXUIElement] else { return }
+
+        for axWindow in axWindows {
+            var axWindowID: CGWindowID = 0
+            if _AXUIElementGetWindow(axWindow, &axWindowID) == .success,
+               axWindowID == windowInfo.id {
+                AXUIElementPerformAction(axWindow, kAXPressAction as CFString)
+                // Close via the close button
+                var closeRef: CFTypeRef?
+                if AXUIElementCopyAttributeValue(axWindow, kAXCloseButtonAttribute as CFString, &closeRef) == .success {
+                    AXUIElementPerformAction(closeRef as! AXUIElement, kAXPressAction as CFString)
+                }
+                return
+            }
+        }
     }
 }
