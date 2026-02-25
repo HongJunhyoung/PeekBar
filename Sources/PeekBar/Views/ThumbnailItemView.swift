@@ -8,6 +8,7 @@ struct ThumbnailItemView: View {
     var settings = PeekBarSettings.shared
 
     @State private var isHovered = false
+    @State private var hoverTimer: Timer?
 
     private var displayName: String {
         store.displayName(for: windowInfo)
@@ -50,6 +51,15 @@ struct ThumbnailItemView: View {
         .animation(.easeInOut(duration: 0.15), value: isHovered)
         .onHover { hovering in
             isHovered = hovering
+            hoverTimer?.invalidate()
+            hoverTimer = nil
+            if hovering {
+                hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { _ in
+                    Task { @MainActor in
+                        onTap()
+                    }
+                }
+            }
         }
         .onTapGesture {
             onTap()
