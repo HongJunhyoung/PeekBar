@@ -15,9 +15,9 @@ actor WindowCaptureService {
     func start() {
         guard !isRunning else { return }
         isRunning = true
-        captureTask = Task { [weak self] in
-            while !Task.isCancelled {
-                await self?.captureAllWindows()
+        captureTask = Task {
+            while !Task.isCancelled && isRunning {
+                await captureAllWindows()
                 try? await Task.sleep(for: .seconds(2))
             }
         }
