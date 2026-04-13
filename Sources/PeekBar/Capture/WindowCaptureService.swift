@@ -5,39 +5,26 @@ actor WindowCaptureService {
     private let store: WindowStore
     private let captureWidth = 480
     private let captureHeight = 320
-    private var isRunning = false
-    private var captureTask: Task<Void, Never>?
+    private var refreshCounter: UInt64 = 0
 
     init(store: WindowStore) {
         self.store = store
     }
 
-    func start() {
-        guard !isRunning else { return }
-        isRunning = true
-        captureTask = Task {
-            while !Task.isCancelled && isRunning {
-                await captureAllWindows()
-                try? await Task.sleep(for: .seconds(2))
-            }
-        }
-    }
-
-    func stop() {
-        isRunning = false
-        captureTask?.cancel()
-        captureTask = nil
-    }
-
-    func refreshNow() {
-        Task { await captureAllWindows() }
+    /// Called by Timer from AppDelegate — triggers a single capture cycle.
+    /// The caller cancels the previous Task before starting a new one,
+    /// so a hung ScreenCaptureKit call won't block future captures forever.
+    func captureOnce() async {
+        await captureAllWindows()
     }
 
     private func captureAllWindows() async {
         do {
+            guard !Task.isCancelled else { return }
             let content = try await SCShareableContent.excludingDesktopWindows(
                 true, onScreenWindowsOnly: true
             )
+            guard !Task.isCancelled else { return }
 
             let ownPID = ProcessInfo.processInfo.processIdentifier
             let ownBundleID = Bundle.main.bundleIdentifier ?? "com.hongjh.PeekBar"
@@ -56,11 +43,15 @@ actor WindowCaptureService {
                 "com.apple.AssistiveControl",        // Assistive Control
             ]
 
+            let ownAppName = ProcessInfo.processInfo.processName
+
             let eligibleWindows = content.windows.filter { window in
                 guard let app = window.owningApplication else { return false }
                 let bundleID = app.bundleIdentifier ?? ""
+                let appName = app.applicationName
                 return app.processID != ownPID
                     && bundleID != ownBundleID
+                    && appName != ownAppName
                     && !excludedBundleIDs.contains(bundleID)
                     && window.isOnScreen
                     && window.frame.width > 50
@@ -72,7 +63,10 @@ actor WindowCaptureService {
             await withTaskGroup(of: WindowInfo?.self) { group in
                 for window in eligibleWindows {
                     group.addTask { [self] in
-                        await self.captureWindow(window)
+                        // Timeout per window to prevent one hung capture from blocking all
+                        await withTimeoutOrNil(seconds: 3) {
+                            await self.captureWindow(window) ?? nil
+                        } ?? nil
                     }
                 }
                 for await info in group {
@@ -84,6 +78,11 @@ actor WindowCaptureService {
 
             // Sort by app name then title for consistent ordering
             windowInfos.sort { ($0.appName, $0.title) < ($1.appName, $1.title) }
+
+            refreshCounter += 1
+            for i in windowInfos.indices {
+                windowInfos[i].refreshToken = refreshCounter
+            }
 
             await store.update(with: windowInfos)
         } catch {
@@ -129,5 +128,20 @@ actor WindowCaptureService {
             frame: window.frame,
             thumbnail: thumbnail
         )
+    }
+}
+
+/// Returns the result of `operation` or nil if it takes longer than `seconds`.
+private func withTimeoutOrNil<T: Sendable>(seconds: Double, operation: @escaping @Sendable () async -> T) async -> T? {
+    await withTaskGroup(of: T?.self) { group in
+        group.addTask { await operation() }
+        group.addTask {
+            try? await Task.sleep(for: .seconds(seconds))
+            return nil
+        }
+        // Return the first result — either the value or nil (timeout)
+        let result = await group.next() ?? nil
+        group.cancelAll()
+        return result
     }
 }

@@ -10,8 +10,11 @@ Always-on Mission Control for macOS. A persistent strip of live window thumbnail
 - **Live window thumbnails** — continuously updated previews of all open windows
 - **Per-monitor layout** — horizontal strip on top for portrait monitors, vertical strip on left for landscape
 - **Click to activate** — click any thumbnail to bring that window to front
+- **Hover to activate** — hover over a thumbnail for 0.5s to auto-switch
+- **Drag to reorder** — drag thumbnails to arrange display order; order persists across desktop switches
+- **Custom labels** — rename thumbnails via right-click context menu; labels persist across desktop switches
 - **Auto-nudge** — automatically moves windows to avoid overlapping the thumbnail strip
-- **Context menu** — right-click thumbnails to rename, full-size, or quit apps
+- **Context menu** — right-click thumbnails to rename, full-size, or close windows
 - **Configurable** — adjust font size, spacing, and thumbnail dimensions from the menu bar
 - **Start on login** — optional launch at login via Settings
 
@@ -29,6 +32,13 @@ swift build
 .build/debug/PeekBar
 ```
 
+### Release Build
+
+```bash
+bash build-app.sh
+open PeekBar.app
+```
+
 ## Permissions
 
 On first launch, PeekBar will request:
@@ -44,7 +54,9 @@ Grant both in **System Settings > Privacy & Security**.
 - Click the icon to open settings
 - Thumbnails appear automatically on each monitor
 - Click a thumbnail to switch to that window
-- Right-click a thumbnail for options (Rename, Full Size, Quit)
+- Hover a thumbnail for 0.5s to auto-switch
+- Drag thumbnails to reorder them
+- Right-click a thumbnail for options (Rename, Full Size, Close Window)
 
 ## License
 

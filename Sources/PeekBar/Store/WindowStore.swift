@@ -6,11 +6,38 @@ final class WindowStore {
     var windows: [WindowInfo] = []
     /// Custom labels keyed by CGWindowID
     var customLabels: [CGWindowID: String] = [:]
+    /// User-defined display order per screen (keyed by screen number)
+    var customOrder: [CGWindowID] = []
     /// Stable frames to prevent jitter from alert animations
     private var stableFrames: [CGWindowID: CGRect] = [:]
 
     func windows(for screen: NSScreen) -> [WindowInfo] {
-        windows.filter { $0.isOnScreen(screen) }
+        let filtered = windows.filter { $0.isOnScreen(screen) }
+        guard !customOrder.isEmpty else { return filtered }
+        let lookup = Dictionary(uniqueKeysWithValues: filtered.map { ($0.id, $0) })
+        var ordered: [WindowInfo] = []
+        for id in customOrder {
+            if let win = lookup[id] { ordered.append(win) }
+        }
+        for win in filtered where !customOrder.contains(win.id) {
+            ordered.append(win)
+        }
+        return ordered
+    }
+
+    func moveWindow(_ sourceID: CGWindowID, before targetID: CGWindowID, on screen: NSScreen) {
+        // Ensure customOrder reflects current screen windows
+        let current = windows(for: screen).map(\.id)
+        if customOrder.isEmpty || Set(customOrder).intersection(current).count != current.count {
+            customOrder = current
+        }
+        guard let srcIdx = customOrder.firstIndex(of: sourceID) else { return }
+        customOrder.remove(at: srcIdx)
+        if let dstIdx = customOrder.firstIndex(of: targetID) {
+            customOrder.insert(sourceID, at: dstIdx)
+        } else {
+            customOrder.append(sourceID)
+        }
     }
 
     func displayName(for window: WindowInfo) -> String {
@@ -29,13 +56,14 @@ final class WindowStore {
     func update(with newWindows: [WindowInfo]) {
         let activeIDs = Set(newWindows.map(\.id))
 
-        // Clean up stale entries
-        for key in customLabels.keys where !activeIDs.contains(key) {
-            customLabels.removeValue(forKey: key)
-        }
+        // Clean up stale frames (labels and order are preserved
+        // across desktop switches since windows may reappear)
         for key in stableFrames.keys where !activeIDs.contains(key) {
             stableFrames.removeValue(forKey: key)
         }
+        // Note: customOrder is NOT cleaned up here — windows may temporarily
+        // disappear during desktop switches and reappear later.
+        // Stale IDs in customOrder are harmless (skipped in windows(for:)).
 
         // Stabilize frames — only update if moved more than 20px
         let threshold: CGFloat = 20

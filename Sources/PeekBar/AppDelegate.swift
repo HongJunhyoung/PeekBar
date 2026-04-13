@@ -7,6 +7,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = WindowStore()
     private let nudgeService = WindowNudgeService()
     private var nudgeTimer: Timer?
+    private var captureTimer: Timer?
+    private var captureTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Hide from Dock and remove notification badge
@@ -24,9 +26,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        captureTimer?.invalidate()
         nudgeTimer?.invalidate()
         panelManager?.tearDownPanels()
-        Task { await captureService?.stop() }
     }
 
     private func flipMenuBarIcon() {
@@ -57,7 +59,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func startServices() {
         captureService = WindowCaptureService(store: store)
-        Task { await captureService?.start() }
+        // Timer fires every 2s. Each tick cancels any stuck previous capture
+        // and starts a fresh one — prevents actor queue buildup if
+        // ScreenCaptureKit hangs (e.g., after sleep/wake).
+        scheduleCaptureNow()
+        captureTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.scheduleCaptureNow() }
+        }
 
         panelManager = PanelManager(store: store)
         panelManager?.setupPanels()
@@ -87,8 +95,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let captureService = self?.captureService else { return }
-            Task { await captureService.refreshNow() }
+            Task { @MainActor in self?.scheduleCaptureNow() }
+        }
+    }
+
+    /// Cancel any in-flight capture and start a fresh one.
+    /// If ScreenCaptureKit is hung, the old Task is cancelled and
+    /// a new one is created — the actor processes the new call once
+    /// the cancelled one unblocks.
+    private func scheduleCaptureNow() {
+        captureTask?.cancel()
+        captureTask = Task {
+            await captureService?.captureOnce()
         }
     }
 

@@ -72,17 +72,47 @@ final class WindowNudgeService {
                 let vf = screen.visibleFrame
 
                 let appElement = AXUIElementCreateApplication(pid)
-                var windowsRef: CFTypeRef?
-                guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef) == .success,
-                      let axWindows = windowsRef as? [AXUIElement] else { break }
 
-                for axWindow in axWindows {
-                    guard let pos = getPosition(axWindow),
-                          let size = getSize(axWindow) else { continue }
+                // Collect candidate AX windows: mainWindow, focusedWindow, and kAXWindows list
+                var candidates: [AXUIElement] = []
+                for attr in ["AXMainWindow", "AXFocusedWindow"] {
+                    var ref: CFTypeRef?
+                    if AXUIElementCopyAttributeValue(appElement, attr as CFString, &ref) == .success {
+                        candidates.append(ref as! AXUIElement)
+                    }
+                }
+                var windowsRef: CFTypeRef?
+                if AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef) == .success,
+                   let axWindows = windowsRef as? [AXUIElement] {
+                    candidates.append(contentsOf: axWindows)
+                }
+
+                var nudged = false
+                for axWindow in candidates {
+                    // Try to get position/size
+                    var posRef: CFTypeRef?
+                    let posErr = AXUIElementCopyAttributeValue(axWindow, kAXPositionAttribute as CFString, &posRef)
+                    var sizeRef: CFTypeRef?
+                    let sizeErr = AXUIElementCopyAttributeValue(axWindow, kAXSizeAttribute as CFString, &sizeRef)
+
+                    guard posErr == .success, sizeErr == .success else {
+                        // Log role and error for debugging
+                        var roleRef: CFTypeRef?
+                        AXUIElementCopyAttributeValue(axWindow, kAXRoleAttribute as CFString, &roleRef)
+                        NSLog("[PeekBar] wid=\(windowID) pid=\(pid) role=\(roleRef as? String ?? "?") posErr=\(posErr.rawValue) sizeErr=\(sizeErr.rawValue)")
+                        continue
+                    }
+
+                    var pos = CGPoint.zero
+                    AXValueGetValue(posRef as! AXValue, .cgPoint, &pos)
+                    var size = CGSize.zero
+                    AXValueGetValue(sizeRef as! AXValue, .cgSize, &size)
 
                     let tol: CGFloat = 5
                     guard abs(pos.x - axFrame.origin.x) < tol
                         && abs(pos.y - axFrame.origin.y) < tol else { continue }
+
+                    NSLog("[PeekBar] NUDGING wid=\(windowID) pos=\(pos) size=\(size)")
 
                     if isPortrait {
                         let stripBottomNS = reserved.minY
@@ -110,7 +140,11 @@ final class WindowNudgeService {
                     }
 
                     cooldowns[windowID] = now
+                    nudged = true
                     break
+                }
+                if !nudged {
+                    NSLog("[PeekBar] FAILED to nudge wid=\(windowID) — no AX candidate worked, candidates=\(candidates.count)")
                 }
                 break
             }
