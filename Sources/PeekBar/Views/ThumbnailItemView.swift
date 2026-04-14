@@ -109,7 +109,7 @@ struct ThumbnailItemView: View {
         let vf = screen.visibleFrame
         let isPortrait = screen.frame.height > screen.frame.width
         let stripThickness = CGFloat(isPortrait
-            ? settings.thumbnailHeight + settings.fontSize + 16
+            ? settings.thumbnailHeight + settings.fontSize + 22
             : settings.thumbnailWidth + 16)
 
         let appElement = AXUIElementCreateApplication(windowInfo.pid)

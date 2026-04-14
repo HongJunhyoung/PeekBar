@@ -9,7 +9,7 @@ final class PanelManager {
         let s = PeekBarSettings.shared
         if portrait {
             // Top strip — height needs to fit: thumbnail height + font + padding
-            return CGFloat(s.thumbnailHeight + s.fontSize + 16)
+            return CGFloat(s.thumbnailHeight + s.fontSize + 22)
         } else {
             // Left strip — width needs to fit: thumbnail width + padding
             return CGFloat(s.thumbnailWidth + 16)

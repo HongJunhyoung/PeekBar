@@ -7,7 +7,7 @@ final class WindowNudgeService {
     func stripThickness(portrait: Bool) -> CGFloat {
         let s = PeekBarSettings.shared
         if portrait {
-            return CGFloat(s.thumbnailHeight + s.fontSize + 16)
+            return CGFloat(s.thumbnailHeight + s.fontSize + 22)
         } else {
             return CGFloat(s.thumbnailWidth + 16)
         }
@@ -155,11 +155,12 @@ final class WindowNudgeService {
         let vf = screen.visibleFrame
         let isPortrait = screen.frame.height > screen.frame.width
         let thickness = stripThickness(portrait: isPortrait)
+        let margin: CGFloat = 6
 
         if isPortrait {
-            return NSRect(x: vf.origin.x, y: vf.maxY - thickness, width: vf.width, height: thickness)
+            return NSRect(x: vf.origin.x, y: vf.maxY - thickness - margin, width: vf.width, height: thickness + margin)
         } else {
-            return NSRect(x: vf.origin.x, y: vf.origin.y, width: thickness, height: vf.height)
+            return NSRect(x: vf.origin.x, y: vf.origin.y, width: thickness + margin, height: vf.height)
         }
     }
 
