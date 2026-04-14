@@ -9,9 +9,11 @@ PeekBar is a macOS menu bar app that displays a persistent strip of live window 
 ```bash
 swift build                          # debug build
 .build/debug/PeekBar                 # run debug binary
-bash build-app.sh                    # release build → PeekBar.app
+bash build-app.sh                    # release build → PeekBar.app (signed)
 open PeekBar.app                     # run release app
 ```
+
+`build-app.sh` signs with a local "PeekBar Self-Signed" certificate so TCC permissions (Screen Recording, Accessibility) persist across rebuilds. Falls back to ad-hoc signing if the certificate is not found. To create the certificate, see README.
 
 ## Architecture
 
@@ -56,6 +58,8 @@ Sources/PeekBar/
 - **Frame stabilization**: WindowStore ignores frame changes < 20px to prevent jitter
 - **Custom order**: Drag-to-reorder thumbnails; order survives desktop switches (not aggressively cleaned)
 - **Custom labels**: Renamed thumbnails survive desktop switches
+- **Nudge margin**: 6px gap between strip and nudged windows for visual separation
+- **Code signing**: Self-signed certificate keeps TCC permissions across rebuilds
 
 ## Permissions Required
 

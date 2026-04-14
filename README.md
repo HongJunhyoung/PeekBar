@@ -39,6 +39,32 @@ bash build-app.sh
 open PeekBar.app
 ```
 
+### Code Signing (Persist Permissions)
+
+By default, `build-app.sh` signs with a local "PeekBar Self-Signed" certificate so that Screen Recording and Accessibility permissions survive rebuilds. To set up the certificate:
+
+```bash
+# Generate certificate (valid 10 years)
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout /tmp/peekbar.key -out /tmp/peekbar.crt \
+  -days 3650 -subj "/CN=PeekBar Self-Signed" \
+  -addext "keyUsage=critical,digitalSignature" \
+  -addext "extendedKeyUsage=critical,codeSigning"
+
+# Bundle and import into login keychain
+openssl pkcs12 -export -out /tmp/peekbar.p12 \
+  -inkey /tmp/peekbar.key -in /tmp/peekbar.crt \
+  -passout pass:peekbar -legacy
+security import /tmp/peekbar.p12 -k ~/Library/Keychains/login.keychain-db \
+  -P peekbar -T /usr/bin/codesign
+
+# Trust for code signing
+security add-trusted-cert -p codeSign -r trustRoot \
+  -k ~/Library/Keychains/login.keychain-db /tmp/peekbar.crt
+```
+
+If the certificate is not found, the build falls back to ad-hoc signing (permissions reset each rebuild).
+
 ## Permissions
 
 On first launch, PeekBar will request:
