@@ -6,16 +6,24 @@ BUILD_DIR=".build/release"
 APP_BUNDLE="$APP_NAME.app"
 CONTENTS="$APP_BUNDLE/Contents"
 MACOS="$CONTENTS/MacOS"
+RESOURCES="$CONTENTS/Resources"
 
 echo "Building $APP_NAME (release)..."
 swift build -c release
 
 echo "Creating $APP_BUNDLE..."
 rm -rf "$APP_BUNDLE"
-mkdir -p "$MACOS"
+mkdir -p "$MACOS" "$RESOURCES"
 
 cp "$BUILD_DIR/$APP_NAME" "$MACOS/$APP_NAME"
 cp "Sources/PeekBar/Info.plist" "$CONTENTS/Info.plist"
+cp "Resources/AppIcon.icns" "$RESOURCES/AppIcon.icns"
+
+# Copy SPM-generated resource bundle (menu bar icon PNGs)
+RES_BUNDLE="$BUILD_DIR/${APP_NAME}_${APP_NAME}.bundle"
+if [ -d "$RES_BUNDLE" ]; then
+    cp -R "$RES_BUNDLE" "$RESOURCES/"
+fi
 
 # Sign with persistent identity so TCC permissions survive rebuilds
 SIGN_ID="PeekBar Self-Signed"

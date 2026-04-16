@@ -4,6 +4,8 @@
 <dict>
     <key>CFBundleName</key>
     <string>PeekBar</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>com.hongjh.PeekBar</string>
     <key>CFBundleVersion</key>
