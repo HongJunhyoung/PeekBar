@@ -56,22 +56,6 @@ struct ThumbnailItemView: View {
                             }
                     }
                 }
-                .overlay {
-                    if let region = changeIndicator?.region {
-                        GeometryReader { geo in
-                            let rect = CGRect(
-                                x: region.minX * geo.size.width,
-                                y: region.minY * geo.size.height,
-                                width: region.width * geo.size.width,
-                                height: region.height * geo.size.height
-                            )
-                            RoundedRectangle(cornerRadius: 2)
-                                .stroke(Color.yellow, lineWidth: 2)
-                                .frame(width: rect.width, height: rect.height)
-                                .position(x: rect.midX, y: rect.midY)
-                        }
-                    }
-                }
 
                 if isMonitorChangeEnabled {
                     Image(systemName: changeIndicator != nil ? "eye.fill" : "eye")
