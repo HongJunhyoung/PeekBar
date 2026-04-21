@@ -24,7 +24,8 @@ Sources/PeekBar/
 
   Capture/
     WindowCaptureService.swift  # Actor — captures via ScreenCaptureKit
-                                # Scoped: captureAll / capture(pid:) / capture(bundleIDs:)
+                                # Scoped: captureAll / capture(pid:) / captureForMonitoring(bundleIDs:)
+                                # Owns 8x8 grayscale signature cache for change detection
 
   Models/
     WindowInfo.swift            # Window data model (id, pid, bundleID, title, frame, thumbnail)
@@ -38,17 +39,19 @@ Sources/PeekBar/
     ScreenLayoutService.swift   # Screen geometry helpers
     WindowActivationService.swift  # Raises windows via Accessibility API
     WindowNudgeService.swift    # Auto-moves windows to avoid strip overlap
+    ChangeMonitorService.swift  # 5s timer driving Monitor Changes feature
 
   Store/
     Settings.swift              # PeekBarSettings — @Observable singleton, UserDefaults
-                                # Includes liveRefreshBundleIDs (opt-in 2s refresh)
-    WindowStore.swift           # @Observable — windows, custom labels, custom order
+                                # Includes monitorChangeBundleIDs (opt-in 5s change detection)
+    WindowStore.swift           # @Observable — windows, custom labels, custom order, unseenChanges
                                 # update(with:) full replace, merge(updates:inScope:) partial
 
   Views/
     SettingsView.swift          # Settings UI in MenuBarExtra
     ThumbnailStripView.swift    # ScrollView + HStack/VStack of thumbnails, drag-to-reorder
-    ThumbnailItemView.swift     # Individual thumbnail — hover, click, context menu, live badge
+    ThumbnailItemView.swift     # Individual thumbnail — hover, click, context menu, eye badge,
+                                # change-region overlay + bounce animation
 ```
 
 ## Key Patterns
@@ -61,8 +64,8 @@ Sources/PeekBar/
   - App terminate → `store.removeWindows(pid:)`
   - Space change, display wake → `captureAll()` (full re-enum)
   - "Last seen" snapshot: when user switches away from an app, we capture that app's windows once. Hover-to-activate naturally refreshes whichever window the user cares about.
-- **Live Refresh (opt-in 2s polling)**: Right-click thumbnail → "Live Refresh (2s)" toggles the app's bundleID in `PeekBarSettings.liveRefreshBundleIDs`. Separate lightweight timer captures only those bundleIDs. For messenger/monitor apps where backgrounded content changes matter.
-- **Lock/sleep pause**: Live Refresh timer auto-invalidates on screen lock (`com.apple.screenIsLocked`) and display sleep (`screensDidSleepNotification`). Resumes on unlock/wake. Prevents ScreenCaptureKit from hanging while display is off (root cause of WindowServer watchdog freezes).
+- **Monitor Changes (opt-in 5s polling)**: Right-click thumbnail → "Monitor Changes (5s)" toggles the app's bundleID in `PeekBarSettings.monitorChangeBundleIDs`. `ChangeMonitorService` polls those bundles every 5s; `WindowCaptureService.captureForMonitoring` downsamples each thumbnail to an 8x8 grayscale signature and reports a normalized change region per window. Detected changes are stamped on `WindowStore.unseenChanges`, which the thumbnail renders as a yellow overlay rectangle + bounce. Indicators clear automatically when the user activates the app (the "I saw it" signal); the capture service also drops the cached baseline so in-app changes don't trigger a false alert later. Frontmost-app filter skips ticks for the app you're already viewing.
+- **Lock/sleep pause**: `ChangeMonitorService` auto-stops on screen lock (`com.apple.screenIsLocked`) and display sleep (`screensDidSleepNotification`). Resumes on unlock/wake. Prevents ScreenCaptureKit from hanging while display is off (root cause of WindowServer watchdog freezes).
 - **Per-window capture timeout**: 3s timeout per window to prevent one hung capture from blocking all
 - **Frame stabilization**: WindowStore ignores frame changes < 20px to prevent jitter
 - **Custom order**: Drag-to-reorder thumbnails; order survives desktop switches (not aggressively cleaned)
@@ -82,7 +85,7 @@ No test target. Verify manually:
 - Thumbnails appear on launch and update when switching apps (deactivation snapshot)
 - Drag to reorder thumbnails
 - Custom order/labels persist across desktop switches
-- Right-click context menu: Rename, Full Size, Live Refresh (2s), Close Window
+- Right-click context menu: Rename, Full Size, Monitor Changes (5s), Close Window
 - Hover-to-activate (0.5s delay)
-- Live Refresh: enable on a messenger app → small red dot appears → thumbnail updates every 2s
-- Lock screen while Live Refresh enabled → on unlock, no WindowServer watchdog spin in `/Library/Logs/DiagnosticReports/`
+- Monitor Changes: enable on a messenger app → eye badge appears top-right; trigger a content change while the app is in background → thumbnail bounces and a yellow rectangle outlines the changed region. Activate the app → indicator clears immediately for all that app's windows.
+- Lock screen while Monitor Changes enabled → on unlock, no WindowServer watchdog spin in `/Library/Logs/DiagnosticReports/`

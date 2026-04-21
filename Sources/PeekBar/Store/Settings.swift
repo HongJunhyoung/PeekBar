@@ -3,7 +3,7 @@ import Observation
 
 extension Notification.Name {
     static let peekBarSettingsChanged = Notification.Name("peekBarSettingsChanged")
-    static let peekBarLiveRefreshChanged = Notification.Name("peekBarLiveRefreshChanged")
+    static let peekBarMonitorChangeChanged = Notification.Name("peekBarMonitorChangeChanged")
 }
 
 @Observable
@@ -23,20 +23,21 @@ final class PeekBarSettings {
         didSet { save("thumbnailHeight", thumbnailHeight) }
     }
 
-    /// Apps (bundle IDs) whose thumbnails refresh on a 2s timer instead of only on events.
-    /// Opt-in for messenger/monitor apps where backgrounded content changes matter.
-    var liveRefreshBundleIDs: Set<String> {
+    /// Apps (bundle IDs) whose thumbnails are polled every 5s for change detection.
+    /// When a change is spotted, the thumbnail bounces and highlights the changed region
+    /// until the user activates the app.
+    var monitorChangeBundleIDs: Set<String> {
         didSet {
-            UserDefaults.standard.set(Array(liveRefreshBundleIDs), forKey: "liveRefreshBundleIDs")
-            NotificationCenter.default.post(name: .peekBarLiveRefreshChanged, object: nil)
+            UserDefaults.standard.set(Array(monitorChangeBundleIDs), forKey: "monitorChangeBundleIDs")
+            NotificationCenter.default.post(name: .peekBarMonitorChangeChanged, object: nil)
         }
     }
 
-    func toggleLiveRefresh(_ bundleID: String) {
-        if liveRefreshBundleIDs.contains(bundleID) {
-            liveRefreshBundleIDs.remove(bundleID)
+    func toggleMonitorChange(_ bundleID: String) {
+        if monitorChangeBundleIDs.contains(bundleID) {
+            monitorChangeBundleIDs.remove(bundleID)
         } else {
-            liveRefreshBundleIDs.insert(bundleID)
+            monitorChangeBundleIDs.insert(bundleID)
         }
     }
 
@@ -57,7 +58,13 @@ final class PeekBarSettings {
         self.thumbnailSpacing = defaults.double(forKey: "thumbnailSpacing")
         self.thumbnailWidth = defaults.double(forKey: "thumbnailWidth")
         self.thumbnailHeight = defaults.double(forKey: "thumbnailHeight")
-        let stored = defaults.stringArray(forKey: "liveRefreshBundleIDs") ?? []
-        self.liveRefreshBundleIDs = Set(stored)
+        // Migrate old liveRefreshBundleIDs key to monitorChangeBundleIDs (one-shot)
+        if defaults.object(forKey: "monitorChangeBundleIDs") == nil,
+           let legacy = defaults.stringArray(forKey: "liveRefreshBundleIDs") {
+            defaults.set(legacy, forKey: "monitorChangeBundleIDs")
+            defaults.removeObject(forKey: "liveRefreshBundleIDs")
+        }
+        let stored = defaults.stringArray(forKey: "monitorChangeBundleIDs") ?? []
+        self.monitorChangeBundleIDs = Set(stored)
     }
 }

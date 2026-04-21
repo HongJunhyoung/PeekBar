@@ -4,12 +4,11 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panelManager: PanelManager?
     private var captureService: WindowCaptureService?
+    private var monitorChangeService: ChangeMonitorService?
     private let store = WindowStore()
     private let nudgeService = WindowNudgeService()
 
-    /// Only active while at least one app is marked for Live Refresh
-    /// AND the screen is not locked/asleep.
-    private var liveRefreshTimer: Timer?
+    /// Drives whether `monitorChangeService` is allowed to run.
     private var isScreenLocked = false
     private var isDisplayAsleep = false
 
@@ -26,7 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        liveRefreshTimer?.invalidate()
+        monitorChangeService?.stop()
         panelManager?.tearDownPanels()
     }
 
@@ -58,6 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startServices() {
         let capture = WindowCaptureService(store: store)
         captureService = capture
+        monitorChangeService = ChangeMonitorService(store: store, captureService: capture)
 
         panelManager = PanelManager(store: store)
         panelManager?.setupPanels()
@@ -67,7 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         nudgeService.nudgeAllWindows()
 
         registerObservers()
-        updateLiveRefreshTimer()
+        updateMonitorChangeService()
     }
 
     // MARK: - Observers
@@ -133,14 +133,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Display sleep → pause live refresh
+        // Display sleep → pause monitoring
         ws.addObserver(
             forName: NSWorkspace.screensDidSleepNotification,
             object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.isDisplayAsleep = true
-                self?.updateLiveRefreshTimer()
+                self?.updateMonitorChangeService()
             }
         }
         ws.addObserver(
@@ -150,7 +150,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.isDisplayAsleep = false
-                self.updateLiveRefreshTimer()
+                self.updateMonitorChangeService()
                 // State might have drifted during sleep — full refresh
                 if let service = self.captureService {
                     Task { await service.captureAll() }
@@ -166,7 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.isScreenLocked = true
-                self?.updateLiveRefreshTimer()
+                self?.updateMonitorChangeService()
             }
         }
         dnc.addObserver(
@@ -175,7 +175,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.isScreenLocked = false
-                self?.updateLiveRefreshTimer()
+                self?.updateMonitorChangeService()
             }
         }
 
@@ -188,12 +188,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Live refresh membership change → reconsider timer state
+        // Monitor-change membership change → reconsider timer state
         NotificationCenter.default.addObserver(
-            forName: .peekBarLiveRefreshChanged, object: nil, queue: .main
+            forName: .peekBarMonitorChangeChanged, object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.updateLiveRefreshTimer()
+                self?.cleanUpUnmonitoredIndicators()
+                self?.updateMonitorChangeService()
             }
         }
     }
@@ -204,6 +205,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let service = captureService {
             Task { await service.capture(pid: pid) }
         }
+        // The user is now looking at this app — drop any pending change indicators
+        // for its windows, and reset signatures so changes the user makes while
+        // active don't trigger a "change" alert when they switch back later.
+        if let bundleID = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier,
+           !bundleID.isEmpty {
+            store.clearChanges(forBundleID: bundleID)
+            let ids = Set(store.windows.filter { $0.bundleID == bundleID }.map(\.id))
+            if !ids.isEmpty, let service = captureService {
+                Task { await service.clearSignatures(forWindowIDs: ids) }
+            }
+        }
         nudgeService.nudgeAllWindows()
     }
 
@@ -213,23 +225,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // MARK: - Live Refresh timer
+    // MARK: - Monitor Change service
 
-    private func updateLiveRefreshTimer() {
-        let bundleIDs = PeekBarSettings.shared.liveRefreshBundleIDs
+    private func updateMonitorChangeService() {
+        guard let service = monitorChangeService else { return }
+        let bundleIDs = PeekBarSettings.shared.monitorChangeBundleIDs
         let shouldRun = !bundleIDs.isEmpty && !isScreenLocked && !isDisplayAsleep
+        if shouldRun {
+            service.start()
+        } else {
+            service.stop()
+        }
+    }
 
-        if shouldRun && liveRefreshTimer == nil {
-            liveRefreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    let ids = PeekBarSettings.shared.liveRefreshBundleIDs
-                    guard !ids.isEmpty else { return }
-                    await self?.captureService?.capture(bundleIDs: ids)
-                }
-            }
-        } else if !shouldRun, let t = liveRefreshTimer {
-            t.invalidate()
-            liveRefreshTimer = nil
+    /// When a bundleID is removed from the monitored set, drop any pending
+    /// indicators for its windows so they don't linger forever.
+    private func cleanUpUnmonitoredIndicators() {
+        let active = PeekBarSettings.shared.monitorChangeBundleIDs
+        let staleBundleIDs = Set(store.windows.map(\.bundleID)).subtracting(active)
+        for bundleID in staleBundleIDs where !bundleID.isEmpty {
+            store.clearChanges(forBundleID: bundleID)
         }
     }
 

@@ -1,6 +1,13 @@
 import AppKit
 import Observation
 
+struct ChangeIndicator: Equatable {
+    /// Bounding box of the changed area, normalized to the thumbnail (0...1).
+    let region: CGRect
+    /// Increments on every detected change so SwiftUI re-fires the bounce.
+    let bumpToken: UInt64
+}
+
 @Observable
 final class WindowStore {
     var windows: [WindowInfo] = []
@@ -8,8 +15,11 @@ final class WindowStore {
     var customLabels: [CGWindowID: String] = [:]
     /// User-defined display order per screen (keyed by screen number)
     var customOrder: [CGWindowID] = []
+    /// Pending change indicators per window — cleared when the user views the app.
+    var unseenChanges: [CGWindowID: ChangeIndicator] = [:]
     /// Stable frames to prevent jitter from alert animations
     private var stableFrames: [CGWindowID: CGRect] = [:]
+    private var nextBumpToken: UInt64 = 0
 
     func windows(for screen: NSScreen) -> [WindowInfo] {
         let filtered = windows.filter { $0.isOnScreen(screen) }
@@ -83,6 +93,7 @@ final class WindowStore {
             } else if inScope(existing) {
                 // Was in scope of this scan but missing → closed
                 stableFrames.removeValue(forKey: existing.id)
+                unseenChanges.removeValue(forKey: existing.id)
                 continue
             } else {
                 merged.append(existing)
@@ -103,6 +114,26 @@ final class WindowStore {
         windows.removeAll { removedIDs.contains($0.id) }
         for id in removedIDs {
             stableFrames.removeValue(forKey: id)
+            unseenChanges.removeValue(forKey: id)
+        }
+    }
+
+    @MainActor
+    func markChange(windowID: CGWindowID, region: CGRect) {
+        nextBumpToken &+= 1
+        unseenChanges[windowID] = ChangeIndicator(region: region, bumpToken: nextBumpToken)
+    }
+
+    @MainActor
+    func clearChanges(forWindowID windowID: CGWindowID) {
+        unseenChanges.removeValue(forKey: windowID)
+    }
+
+    @MainActor
+    func clearChanges(forBundleID bundleID: String) {
+        let ids = windows.filter { $0.bundleID == bundleID }.map(\.id)
+        for id in ids {
+            unseenChanges.removeValue(forKey: id)
         }
     }
 
