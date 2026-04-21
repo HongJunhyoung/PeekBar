@@ -9,8 +9,7 @@ struct ThumbnailItemView: View {
 
     @State private var isHovered = false
     @State private var hoverTimer: Timer?
-    @State private var bouncing = false
-    @State private var bounceWorkItem: DispatchWorkItem?
+    @State private var bounceScale: CGFloat = 1.0
 
     private var displayName: String {
         store.displayName(for: windowInfo)
@@ -33,6 +32,8 @@ struct ThumbnailItemView: View {
     private var changeIndicator: ChangeIndicator? {
         store.unseenChanges[windowInfo.id]
     }
+
+    private var hasUnseenChange: Bool { changeIndicator != nil }
 
     var body: some View {
         VStack(spacing: 2) {
@@ -81,10 +82,26 @@ struct ThumbnailItemView: View {
                         .padding(4)
                 }
             }
-            .scaleEffect(bouncing ? 1.15 : 1.0)
-            .onChange(of: changeIndicator?.bumpToken) { _, newValue in
-                guard newValue != nil else { return }
-                triggerBounce()
+            .scaleEffect(bounceScale)
+            .task(id: hasUnseenChange) {
+                if hasUnseenChange {
+                    while !Task.isCancelled {
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.5)) {
+                            bounceScale = 1.12
+                        }
+                        try? await Task.sleep(for: .milliseconds(450))
+                        if Task.isCancelled { break }
+                        withAnimation(.spring(response: 0.42, dampingFraction: 0.6)) {
+                            bounceScale = 1.0
+                        }
+                        try? await Task.sleep(for: .milliseconds(450))
+                    }
+                }
+                if bounceScale != 1.0 {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        bounceScale = 1.0
+                    }
+                }
             }
 
             Text(displayName)
@@ -135,20 +152,6 @@ struct ThumbnailItemView: View {
             }
         }
         .help(windowInfo.title.isEmpty ? windowInfo.appName : "\(windowInfo.appName): \(windowInfo.title)")
-    }
-
-    private func triggerBounce() {
-        bounceWorkItem?.cancel()
-        withAnimation(.spring(response: 0.25, dampingFraction: 0.45)) {
-            bouncing = true
-        }
-        let work = DispatchWorkItem {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.55)) {
-                bouncing = false
-            }
-        }
-        bounceWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: work)
     }
 
     private func showRenameDialog() {
