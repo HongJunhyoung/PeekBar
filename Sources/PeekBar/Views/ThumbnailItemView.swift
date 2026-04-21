@@ -41,9 +41,9 @@ struct ThumbnailItemView: View {
                     if let thumbnail = windowInfo.thumbnail {
                         Image(nsImage: thumbnail)
                             .resizable()
-                            .aspectRatio(contentMode: .fill)
+                            .aspectRatio(contentMode: .fit)
                             .frame(width: settings.thumbnailWidth, height: settings.thumbnailHeight)
-                            .clipped()
+                            .background(Color.black.opacity(0.25))
                             .cornerRadius(4)
                     } else {
                         RoundedRectangle(cornerRadius: 4)
@@ -71,8 +71,6 @@ struct ThumbnailItemView: View {
                         }
                     }
                 }
-                .scaleEffect(bouncing ? 1.08 : 1.0)
-                .animation(.spring(response: 0.3, dampingFraction: 0.4), value: bouncing)
 
                 if isMonitorChangeEnabled {
                     Image(systemName: changeIndicator != nil ? "eye.fill" : "eye")
@@ -83,6 +81,7 @@ struct ThumbnailItemView: View {
                         .padding(4)
                 }
             }
+            .scaleEffect(bouncing ? 1.15 : 1.0)
             .onChange(of: changeIndicator?.bumpToken) { _, newValue in
                 guard newValue != nil else { return }
                 triggerBounce()
@@ -140,10 +139,16 @@ struct ThumbnailItemView: View {
 
     private func triggerBounce() {
         bounceWorkItem?.cancel()
-        bouncing = true
-        let work = DispatchWorkItem { bouncing = false }
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.45)) {
+            bouncing = true
+        }
+        let work = DispatchWorkItem {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.55)) {
+                bouncing = false
+            }
+        }
         bounceWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: work)
     }
 
     private func showRenameDialog() {

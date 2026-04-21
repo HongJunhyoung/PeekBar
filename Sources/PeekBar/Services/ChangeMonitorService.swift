@@ -32,8 +32,6 @@ final class ChangeMonitorService {
         var bundleIDs = PeekBarSettings.shared.monitorChangeBundleIDs
         guard !bundleIDs.isEmpty else { return }
 
-        // Skip the frontmost app — if the user is looking at it, they don't need
-        // a "changed" hint, and we'd just clear the indicator on the next activation.
         if let frontBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier {
             bundleIDs.remove(frontBundleID)
         }

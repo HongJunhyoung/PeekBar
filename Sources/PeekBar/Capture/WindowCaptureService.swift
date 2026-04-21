@@ -178,12 +178,11 @@ actor WindowCaptureService {
 
         let filter = SCContentFilter(desktopIndependentWindow: window)
         let config = SCStreamConfiguration()
-        let cropW = min(CGFloat(captureWidth), window.frame.width)
-        let cropH = min(CGFloat(captureHeight), window.frame.height)
-        config.sourceRect = CGRect(x: 0, y: 0, width: cropW, height: cropH)
+        // Capture the whole window scaled to fit the output buffer.
+        config.sourceRect = CGRect(origin: .zero, size: window.frame.size)
         config.width = captureWidth
         config.height = captureHeight
-        config.scalesToFit = false
+        config.scalesToFit = true
         config.showsCursor = false
 
         var thumbnail: NSImage?
@@ -227,31 +226,31 @@ actor WindowCaptureService {
         let rows = Self.signatureRows
         var pixels = [UInt8](repeating: 0, count: cols * rows)
         let colorSpace = CGColorSpaceCreateDeviceGray()
-        let result: CGContext? = pixels.withUnsafeMutableBytes { buf -> CGContext? in
-            guard let base = buf.baseAddress else { return nil }
-            return CGContext(
-                data: base,
-                width: cols,
-                height: rows,
-                bitsPerComponent: 8,
-                bytesPerRow: cols,
-                space: colorSpace,
-                bitmapInfo: CGImageAlphaInfo.none.rawValue
-            )
+        let ok = pixels.withUnsafeMutableBytes { buf -> Bool in
+            guard let base = buf.baseAddress,
+                  let ctx = CGContext(
+                    data: base,
+                    width: cols,
+                    height: rows,
+                    bitsPerComponent: 8,
+                    bytesPerRow: cols,
+                    space: colorSpace,
+                    bitmapInfo: CGImageAlphaInfo.none.rawValue
+                  ) else { return false }
+            ctx.interpolationQuality = .low
+            // Flip so pixel row 0 corresponds to the top of the source image.
+            ctx.translateBy(x: 0, y: CGFloat(rows))
+            ctx.scaleBy(x: 1, y: -1)
+            ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: cols, height: rows))
+            return true
         }
-        guard let ctx = result else { return nil }
-        ctx.interpolationQuality = .low
-        // Flip so pixel row 0 corresponds to the top of the source image.
-        ctx.translateBy(x: 0, y: CGFloat(rows))
-        ctx.scaleBy(x: 1, y: -1)
-        ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: cols, height: rows))
-        return pixels
+        return ok ? pixels : nil
     }
 
     /// Returns the bounding box (normalized 0...1, top-left origin) of cells
     /// whose grayscale changed by more than `threshold`. Returns nil if nothing
     /// changed.
-    private func diffRegion(prev: [UInt8], next: [UInt8], threshold: Int = 12) -> CGRect? {
+    private func diffRegion(prev: [UInt8], next: [UInt8], threshold: Int = 6) -> CGRect? {
         let cols = Self.signatureCols
         let rows = Self.signatureRows
         guard prev.count == cols * rows, next.count == cols * rows else { return nil }
