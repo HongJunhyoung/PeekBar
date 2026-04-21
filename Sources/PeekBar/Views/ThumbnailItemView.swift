@@ -14,23 +14,46 @@ struct ThumbnailItemView: View {
         store.displayName(for: windowInfo)
     }
 
+    private var isLiveRefreshEnabled: Bool {
+        !windowInfo.bundleID.isEmpty
+            && settings.liveRefreshBundleIDs.contains(windowInfo.bundleID)
+    }
+
+    private var liveRefreshMenuTitle: String {
+        isLiveRefreshEnabled ? "Stop Live Refresh" : "Live Refresh (2s)"
+    }
+
+    private func toggleLiveRefresh() {
+        guard !windowInfo.bundleID.isEmpty else { return }
+        settings.toggleLiveRefresh(windowInfo.bundleID)
+    }
+
     var body: some View {
         VStack(spacing: 2) {
-            if let thumbnail = windowInfo.thumbnail {
-                Image(nsImage: thumbnail)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: settings.thumbnailWidth, height: settings.thumbnailHeight)
-                    .clipped()
-                    .cornerRadius(4)
-            } else {
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.gray.opacity(0.3))
-                    .frame(width: settings.thumbnailWidth, height: settings.thumbnailHeight)
-                    .overlay {
-                        Image(systemName: "macwindow")
-                            .foregroundColor(.gray)
-                    }
+            ZStack(alignment: .topTrailing) {
+                if let thumbnail = windowInfo.thumbnail {
+                    Image(nsImage: thumbnail)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: settings.thumbnailWidth, height: settings.thumbnailHeight)
+                        .clipped()
+                        .cornerRadius(4)
+                } else {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.gray.opacity(0.3))
+                        .frame(width: settings.thumbnailWidth, height: settings.thumbnailHeight)
+                        .overlay {
+                            Image(systemName: "macwindow")
+                                .foregroundColor(.gray)
+                        }
+                }
+                if isLiveRefreshEnabled {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 8, height: 8)
+                        .overlay(Circle().stroke(Color.white.opacity(0.6), lineWidth: 1))
+                        .padding(4)
+                }
             }
 
             Text(displayName)
@@ -70,6 +93,10 @@ struct ThumbnailItemView: View {
             }
             Button("Full Size") {
                 maximizeWindow()
+            }
+            Divider()
+            Button(liveRefreshMenuTitle) {
+                toggleLiveRefresh()
             }
             Divider()
             Button("Close Window") {

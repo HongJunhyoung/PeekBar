@@ -11,14 +11,50 @@ actor WindowCaptureService {
         self.store = store
     }
 
-    /// Called by Timer from AppDelegate — triggers a single capture cycle.
-    /// The caller cancels the previous Task before starting a new one,
-    /// so a hung ScreenCaptureKit call won't block future captures forever.
-    func captureOnce() async {
-        await captureAllWindows()
+    private enum Scope {
+        case all
+        case pid(pid_t)
+        case bundleIDs(Set<String>)
+
+        func matches(_ window: SCWindow) -> Bool {
+            switch self {
+            case .all: return true
+            case .pid(let p): return window.owningApplication?.processID == p
+            case .bundleIDs(let ids):
+                guard let bid = window.owningApplication?.bundleIdentifier else { return false }
+                return ids.contains(bid)
+            }
+        }
+
+        func matches(_ info: WindowInfo) -> Bool {
+            switch self {
+            case .all: return true
+            case .pid(let p): return info.pid == p
+            case .bundleIDs(let ids): return ids.contains(info.bundleID)
+            }
+        }
     }
 
-    private func captureAllWindows() async {
+    /// Full enumeration + capture. Replaces the entire window list in the store.
+    /// Use on app launch, space change, and wake.
+    func captureAll() async {
+        await capture(scope: .all)
+    }
+
+    /// Capture only windows matching the given bundle IDs. Merges into store
+    /// without disturbing other windows. Used by Live Refresh timer.
+    func capture(bundleIDs: Set<String>) async {
+        guard !bundleIDs.isEmpty else { return }
+        await capture(scope: .bundleIDs(bundleIDs))
+    }
+
+    /// Capture only windows owned by the given PID. Merges into store.
+    /// Used on app activation / deactivation to refresh that app's thumbnails.
+    func capture(pid: pid_t) async {
+        await capture(scope: .pid(pid))
+    }
+
+    private func capture(scope: Scope) async {
         do {
             guard !Task.isCancelled else { return }
             let content = try await SCShareableContent.excludingDesktopWindows(
@@ -28,26 +64,23 @@ actor WindowCaptureService {
 
             let ownPID = ProcessInfo.processInfo.processIdentifier
             let ownBundleID = Bundle.main.bundleIdentifier ?? "com.hongjh.PeekBar"
-
-            // System apps to exclude (notifications, Dock, Control Center, etc.)
             let excludedBundleIDs: Set<String> = [
-                "com.apple.notificationcenterui",   // Notification Center
-                "com.apple.UserNotificationCenter",  // User notifications
-                "com.apple.dock",                    // Dock + badges
-                "com.apple.controlcenter",           // Control Center
-                "com.apple.systemuiserver",          // System UI (menu extras)
-                "com.apple.WindowManager",           // Window Manager / Stage Manager
-                "com.apple.Spotlight",               // Spotlight
-                "com.apple.loginwindow",             // Login window
-                "com.apple.screencaptureui",         // Screenshot UI
-                "com.apple.AssistiveControl",        // Assistive Control
+                "com.apple.notificationcenterui",
+                "com.apple.UserNotificationCenter",
+                "com.apple.dock",
+                "com.apple.controlcenter",
+                "com.apple.systemuiserver",
+                "com.apple.WindowManager",
+                "com.apple.Spotlight",
+                "com.apple.loginwindow",
+                "com.apple.screencaptureui",
+                "com.apple.AssistiveControl",
             ]
-
             let ownAppName = ProcessInfo.processInfo.processName
 
             let eligibleWindows = content.windows.filter { window in
                 guard let app = window.owningApplication else { return false }
-                let bundleID = app.bundleIdentifier ?? ""
+                let bundleID = app.bundleIdentifier
                 let appName = app.applicationName
                 return app.processID != ownPID
                     && bundleID != ownBundleID
@@ -56,35 +89,36 @@ actor WindowCaptureService {
                     && window.isOnScreen
                     && window.frame.width > 50
                     && window.frame.height > 50
+                    && scope.matches(window)
             }
 
             var windowInfos: [WindowInfo] = []
-
             await withTaskGroup(of: WindowInfo?.self) { group in
                 for window in eligibleWindows {
                     group.addTask { [self] in
-                        // Timeout per window to prevent one hung capture from blocking all
                         await withTimeoutOrNil(seconds: 3) {
                             await self.captureWindow(window) ?? nil
                         } ?? nil
                     }
                 }
                 for await info in group {
-                    if let info {
-                        windowInfos.append(info)
-                    }
+                    if let info { windowInfos.append(info) }
                 }
             }
 
-            // Sort by app name then title for consistent ordering
             windowInfos.sort { ($0.appName, $0.title) < ($1.appName, $1.title) }
-
             refreshCounter += 1
             for i in windowInfos.indices {
                 windowInfos[i].refreshToken = refreshCounter
             }
 
-            await store.update(with: windowInfos)
+            switch scope {
+            case .all:
+                await store.update(with: windowInfos)
+            case .pid, .bundleIDs:
+                let capturedScope = scope
+                await store.merge(updates: windowInfos, inScope: { capturedScope.matches($0) })
+            }
         } catch {
             // Permission denied or other error — silently retry next cycle
         }
@@ -92,12 +126,12 @@ actor WindowCaptureService {
 
     private func captureWindow(_ window: SCWindow) async -> WindowInfo? {
         let pid = window.owningApplication?.processID ?? 0
+        let bundleID = window.owningApplication?.bundleIdentifier ?? ""
         let title = window.title ?? ""
         let appName = window.owningApplication?.applicationName ?? "Unknown"
 
         let filter = SCContentFilter(desktopIndependentWindow: window)
         let config = SCStreamConfiguration()
-        // Capture a fixed-size crop from the top-left of the window (no scaling)
         let cropW = min(CGFloat(captureWidth), window.frame.width)
         let cropH = min(CGFloat(captureHeight), window.frame.height)
         config.sourceRect = CGRect(x: 0, y: 0, width: cropW, height: cropH)
@@ -123,6 +157,7 @@ actor WindowCaptureService {
         return WindowInfo(
             id: window.windowID,
             pid: pid,
+            bundleID: bundleID,
             title: title,
             appName: appName,
             frame: window.frame,
@@ -139,7 +174,6 @@ private func withTimeoutOrNil<T: Sendable>(seconds: Double, operation: @escaping
             try? await Task.sleep(for: .seconds(seconds))
             return nil
         }
-        // Return the first result — either the value or nil (timeout)
         let result = await group.next() ?? nil
         group.cancelAll()
         return result

@@ -65,7 +65,48 @@ final class WindowStore {
         // disappear during desktop switches and reappear later.
         // Stale IDs in customOrder are harmless (skipped in windows(for:)).
 
-        // Stabilize frames — only update if moved more than 20px
+        self.windows = stabilizeFrames(newWindows)
+    }
+
+    /// Merge a targeted re-scan into the store. `inScope` identifies which existing
+    /// windows were covered by the scan — any of those not present in `updates` are
+    /// treated as closed and removed. Windows outside the scope are preserved.
+    @MainActor
+    func merge(updates: [WindowInfo], inScope: (WindowInfo) -> Bool) {
+        let stabilized = stabilizeFrames(updates)
+        let updatesByID = Dictionary(uniqueKeysWithValues: stabilized.map { ($0.id, $0) })
+
+        var merged: [WindowInfo] = []
+        for existing in windows {
+            if let updated = updatesByID[existing.id] {
+                merged.append(updated)
+            } else if inScope(existing) {
+                // Was in scope of this scan but missing → closed
+                stableFrames.removeValue(forKey: existing.id)
+                continue
+            } else {
+                merged.append(existing)
+            }
+        }
+        let existingIDs = Set(windows.map(\.id))
+        for update in stabilized where !existingIDs.contains(update.id) {
+            merged.append(update)
+        }
+        merged.sort { ($0.appName, $0.title) < ($1.appName, $1.title) }
+        self.windows = merged
+    }
+
+    /// Remove all windows owned by the given PID (e.g., app terminated).
+    @MainActor
+    func removeWindows(pid: pid_t) {
+        let removedIDs = Set(windows.filter { $0.pid == pid }.map(\.id))
+        windows.removeAll { removedIDs.contains($0.id) }
+        for id in removedIDs {
+            stableFrames.removeValue(forKey: id)
+        }
+    }
+
+    private func stabilizeFrames(_ newWindows: [WindowInfo]) -> [WindowInfo] {
         let threshold: CGFloat = 20
         var stabilized: [WindowInfo] = []
         for var win in newWindows {
@@ -75,10 +116,8 @@ final class WindowStore {
                 let dw = abs(win.frame.width - prev.width)
                 let dh = abs(win.frame.height - prev.height)
                 if dx < threshold && dy < threshold && dw < threshold && dh < threshold {
-                    // Small jitter — keep previous stable frame
                     win.frame = prev
                 } else {
-                    // Real move — update stable frame
                     stableFrames[win.id] = win.frame
                 }
             } else {
@@ -86,7 +125,6 @@ final class WindowStore {
             }
             stabilized.append(win)
         }
-
-        self.windows = stabilized
+        return stabilized
     }
 }

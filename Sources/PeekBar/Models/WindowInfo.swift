@@ -4,6 +4,7 @@ import ScreenCaptureKit
 struct WindowInfo: Identifiable, Equatable {
     let id: CGWindowID
     let pid: pid_t
+    let bundleID: String
     let title: String
     let appName: String
     var frame: CGRect
@@ -13,10 +14,6 @@ struct WindowInfo: Identifiable, Equatable {
 
     static func == (lhs: WindowInfo, rhs: WindowInfo) -> Bool {
         lhs.id == rhs.id && lhs.frame == rhs.frame && lhs.title == rhs.title && lhs.refreshToken == rhs.refreshToken
-    }
-
-    var bundleIdentifier: String? {
-        NSRunningApplication(processIdentifier: pid)?.bundleIdentifier
     }
 
     func isOnScreen(_ screen: NSScreen) -> Bool {
