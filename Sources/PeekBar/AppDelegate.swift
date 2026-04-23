@@ -5,6 +5,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panelManager: PanelManager?
     private var captureService: WindowCaptureService?
     private var monitorChangeService: ChangeMonitorService?
+    private var moveObserver: WindowMoveObserverService?
     private let store = WindowStore()
     private let nudgeService = WindowNudgeService()
 
@@ -26,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         monitorChangeService?.stop()
+        moveObserver?.stop()
         panelManager?.tearDownPanels()
     }
 
@@ -59,12 +61,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         captureService = capture
         monitorChangeService = ChangeMonitorService(store: store, captureService: capture)
 
+        let observer = WindowMoveObserverService { [weak self] in
+            guard let self else { return }
+            self.nudgeService.nudgeAllWindows()
+            self.moveObserver?.suppress(for: 0.5)
+        }
+        moveObserver = observer
+
         panelManager = PanelManager(store: store)
         panelManager?.setupPanels()
 
         // Initial full sweep
         Task { await capture.captureAll() }
         nudgeService.nudgeAllWindows()
+
+        if let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier {
+            observer.watch(pid: frontPID)
+        }
 
         registerObservers()
         updateMonitorChangeService()
@@ -217,6 +230,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         nudgeService.nudgeAllWindows()
+        moveObserver?.watch(pid: pid)
+        moveObserver?.suppress(for: 0.5)
     }
 
     private func onAppDeactivated(pid: pid_t) {
